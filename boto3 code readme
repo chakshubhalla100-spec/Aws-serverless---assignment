@@ -1,0 +1,193 @@
+Exercise 1 – Lambda auto start/stop 
+
+***********************boto 3 code 
+
+import boto3
+
+# Initialize EC2 client
+ec2 = boto3.client('ec2')
+
+def lambda_handler(event, context):
+    stop_instance_ids = ['i-05112e43c8e1cd0dc']
+    start_instance_ids = ['i-023362a8183c8f81a']
+
+    # Stop instances
+    if stop_instance_ids:
+        ec2.stop_instances(InstanceIds=stop_instance_ids)
+        print(f"Stopped instances: {stop_instance_ids}")
+    else:
+        print("No instances found for stopping.")
+
+    # Start instances
+    if start_instance_ids:
+        ec2.start_instances(InstanceIds=start_instance_ids)
+        print(f"Started instances: {start_instance_ids}")
+    else:
+        print("No instances found for starting.")
+
+    return {
+        'statusCode': 200,
+        'body': 'EC2 start/stop automation completed.'
+    }
+
+************************************************************************************
+
+2.Automated S3 Bucket Cleanup Using AWS Lambda and Boto3
+
+*********************boto3 code *********************
+
+import boto3
+from datetime import datetime, timezone, timedelta
+
+# Create S3 client
+s3 = boto3.client('s3')
+
+# Your bucket name
+bucket_name = 'aws-chakshu20-04-test'
+
+def lambda_handler(event, context):
+
+    
+    old_date = datetime.now(timezone.utc) - timedelta(days=3)
+
+    
+    objects = s3.list_objects_v2(Bucket=bucket_name)
+
+   
+    if 'Contents' in objects:
+
+        for file in objects['Contents']:
+
+            file_name = file['Key']
+            file_date = file['LastModified']
+
+            # Check old files
+            if file_date < old_date:
+
+                # Delete file
+                s3.delete_object(
+                    Bucket=bucket_name,
+                    Key=file_name
+                )
+
+                print(f"Deleted: {file_name}")
+
+    return {
+        'statusCode': 200,
+        'body': 'Old files deleted successfully'
+    }
+****************************************************************************************
+
+4. Automatic EBS Snapshot and Cleanup Using AWS Lambda and Boto3
+
+************************* boto3 code ***********************************
+
+Lambda code 
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+import boto3
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+VOLUME_ID = "YOUR_VOLUME_ID" 
+RETENTION_DAYS = 30
+
+def lambda_handler(event, context):
+    ec2 = boto3.client('ec2')
+    current_time = datetime.now(timezone.utc)
+    
+    # 1. CREATE SNAPSHOT WITH TAG IN ONE SINGLE CALL
+    try:
+        snapshot = ec2.create_snapshot(
+            VolumeId=VOLUME_ID,
+            Description=f"Automated backup for {VOLUME_ID} on {current_time.strftime('%Y-%m-%d')}",
+            TagSpecifications=[{
+                'ResourceType': 'snapshot',
+                'Tags': [{'Key': 'AutomatedBackup', 'Value': 'True'}]
+            }]
+        )
+        logger.info(f"CREATED_SNAPSHOT: {snapshot['SnapshotId']} for volume {VOLUME_ID}")
+    except Exception as e:
+        logger.error(f"Failed to create snapshot: {str(e)}")
+        raise e
+
+    # 2. LIST AND PURGE SNAPSHOTS OLDER THAN RETENTION WINDOW
+    try:
+        filters = [{'Name': 'tag:AutomatedBackup', 'Values': ['True']}]
+        snapshots = ec2.describe_snapshots(OwnerIds=['self'], Filters=filters)['Snapshots']
+        
+        for snap in snapshots:
+            snap_id = snap['SnapshotId']
+            age_days = (current_time - snap['StartTime']).days
+            
+            if age_days > RETENTION_DAYS:
+                ec2.delete_snapshot(SnapshotId=snap_id)
+                logger.info(f"DELETED_SNAPSHOT: {snap_id} (Age: {age_days} days old)")
+                
+    except Exception as e:
+        logger.error(f"Failed during cleanup cycle: {str(e)}")
+        raise e
+        
+    return {
+        'statusCode': 200,
+        'body': json.dumps('EBS backup and cleanup cycle complete.')
+    }
+
+**************************************************************************************************
+
+3.Monitor Unencrypted S3 Buckets Using AWS Lambda and Boto3
+
+************** boto3 code ********************************************
+
+import boto3
+from botocore.exceptions import ClientError
+
+def lambda_handler(event, context):
+    s3_client = boto3.client('s3')
+    
+    try:
+        response = s3_client.list_buckets()
+        buckets = response.get('Buckets', [])
+        
+        print(f"Found {len(buckets)} total buckets. Checking compliance...\n")
+        non_compliant_buckets = []
+        
+        for bucket in buckets:
+            bucket_name = bucket['Name']
+            
+            try:
+                # Fetch encryption configuration
+                enc_resp = s3_client.get_bucket_encryption(Bucket=bucket_name)
+                rules = enc_resp['ServerSideEncryptionConfiguration']['Rules']
+                
+                # Check the exact encryption algorithm used
+                for rule in rules:
+                    algo = rule['ApplyServerSideEncryptionByDefault']['SSEAlgorithm']
+                    
+                    # Flag buckets using basic SSE-S3 (AES256) instead of custom KMS keys
+                    if algo == 'AES256':
+                        non_compliant_buckets.append(bucket_name)
+                        
+            except ClientError as e:
+                error_code = e.response['Error']['Code']
+                print(f"Could not read encryption for {bucket_name}: {error_code}")
+        
+        # Log results
+        if non_compliant_buckets:
+            print("⚠️ WARNING: The following buckets use basic SSE-S3 instead of corporate KMS encryption:")
+            for bucket in non_compliant_buckets:
+                print(f" - {bucket}")
+        else:
+            print("✅ Success: All S3 buckets comply with KMS encryption standards.")
+            
+        return {
+            'statusCode': 200,
+            'body': f"Checked {len(buckets)} buckets. Found {len(non_compliant_buckets)} basic-encrypted buckets."
+        }
+        
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        return {'statusCode': 500, 'body': "Error processing S3 check."}
+
