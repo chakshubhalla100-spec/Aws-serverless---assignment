@@ -191,3 +191,52 @@ def lambda_handler(event, context):
         print(f"An unexpected error occurred: {e}")
         return {'statusCode': 500, 'body': "Error processing S3 check."}
 
+************************************************
+5. Auto-Tagging EC2 Instances on Launch Using AWS Lambda and Boto3  
+
+Boto script 
+import json
+import logging
+from datetime import datetime, timezone
+import boto3
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+def lambda_handler(event, context):
+    ec2 = boto3.client('ec2')
+    current_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    
+    # Extract details from the EventBridge / CloudTrail event structure
+    detail = event.get('detail', {})
+    response_elements = detail.get('responseElements', {})
+    instances_set = response_elements.get('instancesSet', {})
+    items = instances_set.get('items', [])
+    
+    if not items:
+        logger.warning("No instances found in the event payload.")
+        return {'statusCode': 400, 'body': 'No instances found.'}
+        
+    # Process and tag all instances launched in this specific API request batch
+    for item in items:
+        instance_id = item.get('instanceId')
+        
+        try:
+            ec2.create_tags(
+                Resources=[instance_id],
+                Tags=[
+                    {'Key': 'LaunchDate', 'Value': current_date},
+                    {'Key': 'Environment', 'Value': 'Dev'} # Custom tag choice
+                ]
+            )
+            logger.info(f"SUCCESS_CONFIRMATION: Auto-tagged instance {instance_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to apply tags to {instance_id}: {str(e)}")
+            
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Instance auto-tagging process completed.')
+    }
+
+
